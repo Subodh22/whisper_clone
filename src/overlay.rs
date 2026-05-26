@@ -20,11 +20,25 @@ pub struct Overlay {
 
 fn load_font() -> Option<Font> {
     let settings = FontSettings { collection_index: 0, ..FontSettings::default() };
-    for path in [
+    let mut candidates: Vec<&str> = Vec::new();
+    #[cfg(target_os = "macos")]
+    candidates.extend_from_slice(&[
         "/System/Library/Fonts/Helvetica.ttc",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/Library/Fonts/Arial.ttf",
-    ] {
+    ]);
+    #[cfg(target_os = "windows")]
+    candidates.extend_from_slice(&[
+        r"C:\Windows\Fonts\segoeui.ttf",
+        r"C:\Windows\Fonts\arial.ttf",
+        r"C:\Windows\Fonts\calibri.ttf",
+    ]);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    candidates.extend_from_slice(&[
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ]);
+    for path in candidates {
         if let Ok(data) = std::fs::read(path) {
             if let Ok(font) = Font::from_bytes(data.as_slice(), settings) {
                 return Some(font);

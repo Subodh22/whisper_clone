@@ -1,31 +1,54 @@
 use std::process::Command;
 
-/// Play a short high-pitched beep to signal recording has started.
-/// Uses macOS system sounds via `afplay` for zero dependencies.
+#[cfg(target_os = "macos")]
 pub fn play_start() {
-    // Tink = subtle, high-pitched tap
     let _ = Command::new("afplay")
-        .arg("/System/Library/Sounds/Tink.aiff")
-        .arg("-v")
-        .arg("0.5")
+        .args(["/System/Library/Sounds/Tink.aiff", "-v", "0.5"])
         .spawn();
 }
 
-/// Play a short lower-pitched beep to signal recording has stopped.
+#[cfg(target_os = "macos")]
 pub fn play_stop() {
-    // Pop = slightly lower tone
     let _ = Command::new("afplay")
-        .arg("/System/Library/Sounds/Pop.aiff")
-        .arg("-v")
-        .arg("0.5")
+        .args(["/System/Library/Sounds/Pop.aiff", "-v", "0.5"])
         .spawn();
 }
 
-/// Play an error sound.
+#[cfg(target_os = "macos")]
 pub fn play_error() {
     let _ = Command::new("afplay")
-        .arg("/System/Library/Sounds/Basso.aiff")
-        .arg("-v")
-        .arg("0.3")
+        .args(["/System/Library/Sounds/Basso.aiff", "-v", "0.3"])
         .spawn();
 }
+
+// Windows: use PowerShell to play built-in SystemSounds (async, non-blocking)
+#[cfg(target_os = "windows")]
+pub fn play_start() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command",
+               "[System.Media.SystemSounds]::Asterisk.Play()"])
+        .spawn();
+}
+
+#[cfg(target_os = "windows")]
+pub fn play_stop() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command",
+               "[System.Media.SystemSounds]::Beep.Play()"])
+        .spawn();
+}
+
+#[cfg(target_os = "windows")]
+pub fn play_error() {
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command",
+               "[System.Media.SystemSounds]::Hand.Play()"])
+        .spawn();
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn play_start() {}
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn play_stop() {}
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn play_error() {}

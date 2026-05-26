@@ -16,6 +16,9 @@ winit = "0.30"
 softbuffer = "0.4"
 fontdue = "0.9"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+
 [profile.release]
 opt-level = 3
 lto = true
