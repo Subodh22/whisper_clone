@@ -1,0 +1,22 @@
+[package]
+name = "voxtype"
+version = "0.1.0"
+edition = "2021"
+description = "System-wide dictation powered by Whisper AI — free, offline, private"
+
+[dependencies]
+whisper-rs = "0.12"
+cpal = "0.15"
+enigo = "0.2"
+anyhow = "1"
+dirs = "5"
+reqwest = { version = "0.12", features = ["blocking"] }
+indicatif = "0.17"
+winit = "0.30"
+softbuffer = "0.4"
+fontdue = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

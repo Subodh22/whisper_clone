@@ -1,0 +1,6 @@
+/target
+/VoxType.app
+/VoxType.dmg
+*.gguf
+*.bin
+Cargo.lock
