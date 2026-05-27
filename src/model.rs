@@ -100,7 +100,11 @@ pub fn available_models() -> Vec<(&'static str, &'static str)> {
         ("tiny", "~75 MB — fastest, multilingual"),
         ("base.en", "~142 MB — balanced, English only"),
         ("base", "~142 MB — balanced, multilingual"),
-        ("small.en", "~466 MB — most accurate, English only"),
-        ("small", "~466 MB — most accurate, multilingual"),
+        ("small.en", "~466 MB — good, English only"),
+        ("small", "~466 MB — good, multilingual"),
+        ("medium.en", "~1.5 GB — great, English only"),
+        ("medium", "~1.5 GB — great, multilingual"),
+        ("large-v2", "~2.9 GB — best, multilingual"),
+        ("large-v3", "~2.9 GB — best, multilingual"),
     ]
 }

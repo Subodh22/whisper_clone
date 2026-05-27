@@ -4,8 +4,13 @@ version = "0.1.0"
 edition = "2021"
 description = "System-wide dictation powered by Whisper AI — free, offline, private"
 
+[features]
+# cargo build --release            → uses small.en
+# cargo build --release --features medium → uses medium.en
+medium = []
+
 [dependencies]
-whisper-rs = "0.12"
+whisper-rs = { version = "0.16", features = ["cuda"] }
 cpal = "0.15"
 enigo = "0.2"
 anyhow = "1"
@@ -15,6 +20,8 @@ indicatif = "0.17"
 winit = "0.30"
 softbuffer = "0.4"
 fontdue = "0.9"
+raw-window-handle = "0.6"
+tray-icon = "0.20"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_UI_Input_KeyboardAndMouse"] }

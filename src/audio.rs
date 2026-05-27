@@ -57,6 +57,18 @@ impl Recorder {
                 err_fn,
                 None,
             )?,
+            cpal::SampleFormat::F64 => {
+                let buffer = self.buffer.clone();
+                self.device.build_input_stream(
+                    &config,
+                    move |data: &[f64], _: &cpal::InputCallbackInfo| {
+                        let floats: Vec<f32> = data.iter().map(|&s| s as f32).collect();
+                        buffer.lock().unwrap().extend_from_slice(&floats);
+                    },
+                    err_fn,
+                    None,
+                )?
+            }
             cpal::SampleFormat::I16 => {
                 let buffer = self.buffer.clone();
                 self.device.build_input_stream(
@@ -64,6 +76,19 @@ impl Recorder {
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         let floats: Vec<f32> =
                             data.iter().map(|&s| s as f32 / 32768.0).collect();
+                        buffer.lock().unwrap().extend_from_slice(&floats);
+                    },
+                    err_fn,
+                    None,
+                )?
+            }
+            cpal::SampleFormat::I32 => {
+                let buffer = self.buffer.clone();
+                self.device.build_input_stream(
+                    &config,
+                    move |data: &[i32], _: &cpal::InputCallbackInfo| {
+                        let floats: Vec<f32> =
+                            data.iter().map(|&s| s as f32 / 2_147_483_648.0).collect();
                         buffer.lock().unwrap().extend_from_slice(&floats);
                     },
                     err_fn,
@@ -85,7 +110,7 @@ impl Recorder {
                     None,
                 )?
             }
-            _ => return Err(anyhow!("Unsupported sample format: {:?}", sample_format)),
+            fmt => return Err(anyhow!("Unsupported sample format: {:?}", fmt)),
         };
 
         stream.play()?;
