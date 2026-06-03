@@ -123,86 +123,140 @@ fn draw_frame(
     frame: u32,
     font: Option<&Font>,
 ) {
-    // Skip draw if window hasn't been sized yet
     if w < 40 || h < 20 {
         return;
     }
-    buf.fill(0x00000000);
+    buf.fill(0x00000000); // Transparent
 
-    let pad = 5usize;
-    let corner_r = 20usize;
+    let pad = 8usize;
+    let corner_r = 24usize;
 
-    // White card background
+    // === Dark glass background ===
     for y in 0..h {
         for x in 0..w {
             if in_rounded_rect(x, y, pad, pad, w - pad, h - pad, corner_r) {
-                buf[y * w + x] = 0xFFF5F5F5;
+                // Dark glass: deep charcoal with subtle transparency
+                buf[y * w + x] = 0xCC1A1A2E; // Dark violet-gray, ~80% opacity
             }
         }
     }
 
-    // Subtle 1px border
+    // === Subtle inner glow on top edge ===
+    for y in pad..(pad + 6) {
+        let alpha = ((1.0 - (y - pad) as f32 / 6.0) * 30.0) as u32;
+        for x in pad..w.saturating_sub(pad) {
+            if in_rounded_rect(x, y, pad, pad, w - pad, h - pad, corner_r) {
+                let fg = 0x2000D1FF; // Subtle blue-white glow
+                buf[y * w + x] = blend_over(fg & !0xFF000000 | (alpha << 24), buf[y * w + x]);
+            }
+        }
+    }
+
+    // === Subtle border (glass edge) ===
     for y in 0..h {
         for x in 0..w {
             let inner = in_rounded_rect(x, y, pad + 1, pad + 1, w - pad - 1, h - pad - 1, corner_r.saturating_sub(1));
             let outer = in_rounded_rect(x, y, pad, pad, w - pad, h - pad, corner_r);
             if outer && !inner {
-                buf[y * w + x] = 0xFFD1D1D6;
+                buf[y * w + x] = 0x40FFFFFF; // Subtle white border
             }
         }
     }
 
     let cy = h / 2;
 
-    // === Red pulsing dot ===
-    let dot_r = 8usize;
-    let dot_cx = pad + 22;
-    let dot_cy = cy;
-    let pulse = ((frame as f32 * 0.15).sin() * 0.25 + 0.75).clamp(0.0, 1.0);
-    let dot_alpha = (210.0 + pulse * 45.0) as u32;
-    let dot_rgb = 0x00FF3B30u32; // iOS system red
-
-    for ry in dot_cy.saturating_sub(dot_r + 1)..=(dot_cy + dot_r + 1).min(h.saturating_sub(1)) {
-        for rx in dot_cx.saturating_sub(dot_r + 1)..=(dot_cx + dot_r + 1).min(w.saturating_sub(1)) {
-            let dx = rx as f32 - dot_cx as f32;
-            let dy = ry as f32 - dot_cy as f32;
+    // === Pulsing recording ring ===
+    let ring_r = 10usize;
+    let ring_cx = pad + 24;
+    let ring_cy = cy;
+    let pulse = ((frame as f32 * 0.08).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+    let ring_outer_r = ring_r as f32 + 4.0 * pulse;
+    let ring_alpha = (180.0 + pulse * 75.0) as u32;
+    
+    // Outer pulse ring
+    for ry in (ring_cy.saturating_sub((ring_outer_r.ceil() + 2.0) as usize)..=(ring_cy + (ring_outer_r.ceil() + 2.0) as usize).min(h.saturating_sub(1))) {
+        for rx in (ring_cx.saturating_sub((ring_outer_r.ceil() + 2.0) as usize)..=(ring_cx + (ring_outer_r.ceil() + 2.0) as usize).min(w.saturating_sub(1))) {
+            let dx = rx as f32 - ring_cx as f32;
+            let dy = ry as f32 - ring_cy as f32;
             let dist = (dx * dx + dy * dy).sqrt();
-            if dist <= dot_r as f32 {
-                buf[ry * w + rx] = (dot_alpha << 24) | dot_rgb;
-            } else if dist < dot_r as f32 + 1.0 {
-                let aa = (1.0 - (dist - dot_r as f32)).clamp(0.0, 1.0);
-                let a = ((dot_alpha as f32) * aa) as u32;
-                buf[ry * w + rx] = blend_over((a << 24) | dot_rgb, buf[ry * w + rx]);
+            // Ring at ring_r with width based on pulse
+            if (dist >= ring_r as f32 - 2.0 && dist <= ring_outer_r) || (dist >= ring_outer_r - 1.0 && dist <= ring_outer_r + 1.0) {
+                let alpha = if dist >= ring_outer_r - 1.0 && dist <= ring_outer_r + 1.0 {
+                    ring_alpha / 2
+                } else {
+                    ring_alpha
+                };
+                buf[ry * w + rx] = (alpha << 24) | 0xFF6B9DFC; // Soft blue
+            }
+        }
+    }
+
+    // Solid inner dot
+    for ry in ring_cy.saturating_sub(ring_r)..=(ring_cy + ring_r).min(h.saturating_sub(1)) {
+        for rx in ring_cx.saturating_sub(ring_r)..=(ring_cx + ring_r).min(w.saturating_sub(1)) {
+            let dx = rx as f32 - ring_cx as f32;
+            let dy = ry as f32 - ring_cy as f32;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist <= ring_r as f32 - 1.0 {
+                buf[ry * w + rx] = 0xFFFF6B6B; // Warm red-coral
+            } else if dist < ring_r as f32 {
+                let aa = (1.0 - (dist - ring_r as f32)).clamp(0.0, 1.0);
+                let a = (220.0 * aa) as u32;
+                buf[ry * w + rx] = (a << 24) | 0xFFFF6B6B;
             }
         }
     }
 
     // === "Recording" label ===
-    let text_x = dot_cx + dot_r + 9;
+    let text_x = ring_cx + ring_r + 14;
     if let Some(f) = font {
-        draw_text(buf, w, h, f, "Recording", text_x, cy + 5, 13.5, 0xFF1C1C1E);
+        draw_text(buf, w, h, f, "Recording", text_x, cy + 4, 13.0, 0xFFD1D5E0);
     }
 
-    // === Waveform (centered, bidirectional bars) ===
-    let wave_x0 = 140usize;
-    let wave_x1 = w.saturating_sub(145);
-    let max_half_h = h / 2 - pad - 6;
+    // === Waveform (centered, gradient bars with glow) ===
+    let wave_x0 = 155usize;
+    let wave_x1 = w.saturating_sub(170);
+    let max_half_h = h / 2 - pad - 8;
 
     if let (true, n) = (wave_x1 > wave_x0, bars.len()) {
         if n > 0 {
             let area_w = wave_x1 - wave_x0;
             let slot_w = (area_w / n).max(1);
-            let bar_w = slot_w.max(1).min(2);
+            let bar_w = slot_w.max(1).min(3);
 
             for (i, &level) in bars.iter().enumerate() {
-                let half_h = ((level * max_half_h as f32) as usize).max(2);
-                let x0 = wave_x0 + i * slot_w;
-                let y_top = cy.saturating_sub(half_h);
-                let y_bot = (cy + half_h).min(h.saturating_sub(1));
+                if level > 0.05 { // Only draw significant levels
+                    let half_h = ((level * max_half_h as f32) as usize).max(3);
+                    let x0 = wave_x0 + i * slot_w;
+                    let y_top = cy.saturating_sub(half_h);
+                    let y_bot = (cy + half_h).min(h.saturating_sub(1));
 
-                for py in y_top..=y_bot {
-                    for px in x0..(x0 + bar_w).min(w) {
-                        buf[py * w + px] = 0xFF1C1C1E;
+                    // Gradient color from cyan to purple based on level
+                    let color_t = level;
+                    let r = (60.0 + color_t * 120.0) as u32;
+                    let g = (120.0 + color_t * 60.0) as u32;
+                    let b = (220.0 + color_t * 35.0) as u32;
+                    let bar_color = (0xFF000000 | (r << 16) | (g << 8) | b);
+
+                    // Draw glow behind bar
+                    if level > 0.3 {
+                        let glow_alpha = (level * 60.0) as u32;
+                        let glow_color = (glow_alpha << 24) | (r << 16) | (g << 8) | b;
+                        for py in (y_top.saturating_sub(2))..=(y_bot + 2) {
+                            for px in (x0.saturating_sub(1))..=(x0 + bar_w).min(w) {
+                                if py >= y_top && py <= y_bot && px >= x0 && px < x0 + bar_w {
+                                    continue; // Skip main bar area
+                                }
+                                buf[py * w + px] = blend_over(glow_color, buf[py * w + px]);
+                            }
+                        }
+                    }
+
+                    // Draw main bar
+                    for py in y_top..=y_bot {
+                        for px in x0..(x0 + bar_w).min(w) {
+                            buf[py * w + px] = bar_color;
+                        }
                     }
                 }
             }
@@ -211,33 +265,33 @@ fn draw_frame(
 
     // === Right section: Stop / Cancel Esc ===
     if let Some(f) = font {
-        let right_edge = w.saturating_sub(pad + 10);
+        let right_edge = w.saturating_sub(pad + 12);
 
         // "Esc" key badge
-        let badge_h = 20usize;
+        let badge_h = 22usize;
         let badge_y = cy.saturating_sub(badge_h / 2);
-        let esc_w = 28usize;
+        let esc_w = 30usize;
         let esc_x = right_edge.saturating_sub(esc_w);
-        draw_badge(buf, w, h, esc_x, badge_y, esc_w, badge_h, 5);
-        draw_text_in_badge(buf, w, h, f, "Esc", esc_x, badge_y, esc_w, badge_h, 10.0, 0xFF3C3C43);
+        draw_badge_dark(buf, w, h, esc_x, badge_y, esc_w, badge_h, 5);
+        draw_text_in_badge(buf, w, h, f, "Esc", esc_x, badge_y, esc_w, badge_h, 10.5, 0xFF9CA3AF);
 
-        // "Cancel" text (right-aligned to Esc badge)
-        let cancel_w = text_width(f, "Cancel", 13.5);
-        let cancel_x = esc_x.saturating_sub(cancel_w + 7);
-        draw_text(buf, w, h, f, "Cancel", cancel_x, cy + 5, 13.5, 0xFF1C1C1E);
+        // "Cancel" text
+        let cancel_w = text_width(f, "Cancel", 13.0);
+        let cancel_x = esc_x.saturating_sub(cancel_w + 10);
+        draw_text(buf, w, h, f, "Cancel", cancel_x, cy + 4, 13.0, 0xFFD1D5E0);
 
-        // Thin vertical divider
-        let div_x = cancel_x.saturating_sub(10);
-        for dy in cy.saturating_sub(10)..cy + 10 {
+        // Vertical divider
+        let div_x = cancel_x.saturating_sub(12);
+        for dy in cy.saturating_sub(12)..cy + 12 {
             if div_x < w {
-                buf[dy * w + div_x] = blend_over(0x30000000, buf[dy * w + div_x]);
+                buf[dy * w + div_x] = 0x40FFFFFF;
             }
         }
 
-        // "Stop" text (right of divider)
-        let stop_w = text_width(f, "Stop", 13.5);
-        let stop_x = div_x.saturating_sub(stop_w + 7);
-        draw_text(buf, w, h, f, "Stop", stop_x, cy + 5, 13.5, 0xFF1C1C1E);
+        // "Stop" text
+        let stop_w = text_width(f, "Stop", 13.0);
+        let stop_x = div_x.saturating_sub(stop_w + 10);
+        draw_text(buf, w, h, f, "Stop", stop_x, cy + 4, 13.0, 0xFFD1D5E0);
     }
 }
 
@@ -257,6 +311,16 @@ fn draw_badge(buf: &mut [u32], w: usize, h: usize, x: usize, y: usize, bw: usize
         for px in x..(x + bw).min(w) {
             if in_rounded_rect(px, py, x, y, x + bw, y + bh, r) {
                 buf[py * w + px] = 0xFFE5E5EA;
+            }
+        }
+    }
+}
+
+fn draw_badge_dark(buf: &mut [u32], w: usize, h: usize, x: usize, y: usize, bw: usize, bh: usize, r: usize) {
+    for py in y..(y + bh).min(h) {
+        for px in x..(x + bw).min(w) {
+            if in_rounded_rect(px, py, x, y, x + bw, y + bh, r) {
+                buf[py * w + px] = 0x30FFFFFF; // Semi-transparent white for dark theme
             }
         }
     }
