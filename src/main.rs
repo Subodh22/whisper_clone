@@ -16,6 +16,10 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId, WindowLevel};
 
+// Overlay window size (logical px). Compact pill to match the dark UI.
+const OVERLAY_W: f64 = 320.0;
+const OVERLAY_H: f64 = 84.0;
+
 fn peak_from_buf(buf: &Mutex<Vec<f32>>) -> f32 {
     let b = buf.lock().unwrap();
     if b.is_empty() {
@@ -48,7 +52,7 @@ impl ApplicationHandler<AppEvent> for App {
         }
 
         let attrs = Window::default_attributes()
-            .with_inner_size(LogicalSize::new(500.0f64, 72.0))
+            .with_inner_size(LogicalSize::new(OVERLAY_W, OVERLAY_H))
             .with_decorations(false)
             .with_transparent(true)
             .with_window_level(WindowLevel::AlwaysOnTop)
@@ -71,8 +75,8 @@ impl ApplicationHandler<AppEvent> for App {
             let sw = size.width as f64 / sf;
             let sh = size.height as f64 / sf;
             window.set_outer_position(LogicalPosition::new(
-                (sw - 500.0) / 2.0,
-                sh - 72.0 - 120.0,
+                (sw - OVERLAY_W) / 2.0,
+                sh - OVERLAY_H - 120.0,
             ));
         }
 
