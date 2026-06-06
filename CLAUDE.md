@@ -1,4 +1,4 @@
-# VoxType
+# Bol
 
 System-wide dictation powered by Whisper AI — free, offline, private. Hold
 `Ctrl+Shift+Space` anywhere to record; on release the audio is transcribed

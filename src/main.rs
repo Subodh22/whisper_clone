@@ -186,7 +186,7 @@ impl ApplicationHandler<AppEvent> for App {
 }
 
 fn main() -> Result<()> {
-    eprintln!("VoxType — System-wide Whisper Dictation");
+    eprintln!("Bol — System-wide Whisper Dictation");
     eprintln!("Hold Ctrl+Shift+Space anywhere to dictate.\n");
 
     let model_path = model::ensure_model("small.en")?;
@@ -198,7 +198,7 @@ fn main() -> Result<()> {
     // Show a notification so the user knows the app is running
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("osascript")
-        .args(["-e", r#"display notification "Hold Ctrl+Shift+Space anywhere to dictate" with title "VoxType is ready""#])
+        .args(["-e", r#"display notification "Hold Ctrl+Shift+Space anywhere to dictate" with title "Bol is ready""#])
         .spawn();
     #[cfg(target_os = "windows")]
     let _ = std::process::Command::new("powershell")
@@ -206,12 +206,12 @@ fn main() -> Result<()> {
             "-NoProfile", "-WindowStyle", "Hidden", "-Command",
             concat!(
                 r#"$xml=[xml]'<toast><visual><binding template="ToastGeneric">"#,
-                r#"<text>VoxType is ready</text>"#,
+                r#"<text>Bol is ready</text>"#,
                 r#"<text>Hold Ctrl+Shift+Space to dictate</text>"#,
                 r#"</binding></visual></toast>';"#,
                 r#"[Windows.UI.Notifications.ToastNotificationManager,"#,
                 r#"Windows.UI.Notifications,ContentType=WindowsRuntime]"#,
-                r#"::CreateToastNotifier('VoxType').Show("#,
+                r#"::CreateToastNotifier('Bol').Show("#,
                 r#"[Windows.UI.Notifications.ToastNotification,"#,
                 r#"Windows.UI.Notifications,ContentType=WindowsRuntime]::new($xml))"#,
             ),

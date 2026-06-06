@@ -1,5 +1,5 @@
 [package]
-name = "voxtype"
+name = "bol"
 version = "0.1.0"
 edition = "2021"
 description = "System-wide dictation powered by Whisper AI — free, offline, private"

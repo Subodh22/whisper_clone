@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
-APP_NAME="VoxType"
+APP_NAME="Bol"
 BUNDLE="$APP_NAME.app"
-BINARY_NAME="voxtype"
+BINARY_NAME="bol"
 
 echo "==> Building release binary..."
 cargo build --release
@@ -23,7 +23,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
     <key>CFBundleExecutable</key>
     <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
-    <string>com.voxtype.app</string>
+    <string>com.bol.app</string>
     <key>CFBundleName</key>
     <string>$APP_NAME</string>
     <key>CFBundleDisplayName</key>
@@ -39,9 +39,9 @@ cat > "$BUNDLE/Contents/Info.plist" <<EOF
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>VoxType needs microphone access to record your voice for dictation.</string>
+    <string>Bol needs microphone access to record your voice for dictation.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>VoxType needs Accessibility access to type transcribed text into other apps.</string>
+    <string>Bol needs Accessibility access to type transcribed text into other apps.</string>
 </dict>
 </plist>
 EOF

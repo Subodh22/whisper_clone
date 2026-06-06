@@ -29,9 +29,9 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-      - name: Upload voxtype.exe
+      - name: Upload bol.exe
         uses: actions/upload-artifact@v4
         with:
-          name: voxtype-windows-x64
-          path: target\release\voxtype.exe
+          name: bol-windows-x64
+          path: target\release\bol.exe
           retention-days: 30

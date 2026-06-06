@@ -8,15 +8,15 @@ use indicatif::{ProgressBar, ProgressStyle};
 const HUGGINGFACE_BASE_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
-/// Returns the path to the VoxType data directory (~/.voxtype/models/).
+/// Returns the path to the Bol data directory (~/.bol/models/).
 fn models_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| anyhow!("Cannot determine home directory"))?;
-    let dir = home.join(".voxtype").join("models");
+    let dir = home.join(".bol").join("models");
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
-/// Returns the local path for a given model name (e.g. "tiny.en" → ~/.voxtype/models/ggml-tiny.en.bin).
+/// Returns the local path for a given model name (e.g. "tiny.en" → ~/.bol/models/ggml-tiny.en.bin).
 fn model_path(model_name: &str) -> Result<PathBuf> {
     Ok(models_dir()?.join(format!("ggml-{}.bin", model_name)))
 }
