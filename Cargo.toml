@@ -10,7 +10,7 @@ description = "System-wide dictation powered by Whisper AI — free, offline, pr
 medium = []
 
 [dependencies]
-whisper-rs = { version = "0.16", features = ["cuda"] }
+whisper-rs = "0.16"
 cpal = "0.15"
 enigo = "0.2"
 anyhow = "1"
