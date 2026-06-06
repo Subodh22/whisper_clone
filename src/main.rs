@@ -1,18 +1,22 @@
 mod audio;
 mod feedback;
 mod hotkey;
+mod launcher;
 mod model;
 mod overlay;
+mod permissions;
 mod settings;
 mod transcriber;
 mod typer;
 
 use anyhow::Result;
+use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem},
     TrayIconBuilder,
 };
 use winit::application::ApplicationHandler;
@@ -23,6 +27,10 @@ use winit::window::{Window, WindowId, WindowLevel};
 
 const OVERLAY_W: f64 = 320.0;
 const OVERLAY_H: f64 = 84.0;
+const HISTORY_SLOTS: usize = 3;
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// ─── Peak level helper ──────────────────────────────────────────────────────
 
 fn peak_from_buf(buf: &Mutex<Vec<f32>>) -> f32 {
     let b = buf.lock().unwrap();
@@ -33,7 +41,8 @@ fn peak_from_buf(buf: &Mutex<Vec<f32>>) -> f32 {
     recent.iter().map(|s| s.abs()).fold(0.0f32, f32::max)
 }
 
-/// Generate a 32×32 RGBA icon: dark gray ring with a red center dot.
+// ─── Tray icon image ────────────────────────────────────────────────────────
+
 fn make_tray_icon() -> Option<tray_icon::Icon> {
     let size = 32u32;
     let mut data = vec![0u8; (size * size * 4) as usize];
@@ -64,33 +73,104 @@ fn make_tray_icon() -> Option<tray_icon::Icon> {
     tray_icon::Icon::from_rgba(data, size, size).ok()
 }
 
+// ─── App events ─────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone)]
 enum AppEvent {
     StartRecording,
     StopRecording,
     CancelRecording,
     AudioLevel(f32),
-    /// Animation tick during transcription (drives the thinking dots).
     Tick,
-    /// Whisper finished; hide the overlay.
-    TranscriptionDone,
+    TranscriptionDone(String),
 }
+
+// ─── Tray menu state ────────────────────────────────────────────────────────
+
+struct TrayState {
+    _tray: tray_icon::TrayIcon,
+    quit_id: MenuId,
+    sounds_item: CheckMenuItem,
+    sounds_id: MenuId,
+    overlay_item: CheckMenuItem,
+    overlay_id: MenuId,
+    login_item: CheckMenuItem,
+    login_id: MenuId,
+    open_config_id: MenuId,
+    hist: [MenuItem; HISTORY_SLOTS],
+}
+
+// ─── App struct ─────────────────────────────────────────────────────────────
 
 struct App {
     overlay: Option<overlay::Overlay>,
-    tray: Option<tray_icon::TrayIcon>,
-    quit_id: Option<tray_icon::menu::MenuId>,
+    tray: Option<TrayState>,
     recorder: Arc<Mutex<audio::Recorder>>,
     transcriber: Arc<transcriber::Transcriber>,
     proxy: winit::event_loop::EventLoopProxy<AppEvent>,
     level_stop: Option<Arc<AtomicBool>>,
     tick_stop: Option<Arc<AtomicBool>>,
-    max_recording_secs: u32,
+    settings: settings::Settings,
+    history: VecDeque<String>,
+    binary_path: PathBuf,
 }
+
+impl App {
+    // Rebuild the 3 history slots in the tray menu.
+    fn refresh_history_menu(&self) {
+        let Some(ref ts) = self.tray else { return };
+        for (i, item) in ts.hist.iter().enumerate() {
+            if let Some(text) = self.history.get(i) {
+                item.set_text(format!("  {}", truncate_menu(text)));
+            } else {
+                item.set_text("  —");
+            }
+        }
+    }
+
+    fn handle_menu_event(&mut self, id: MenuId, event_loop: &ActiveEventLoop) {
+        // Snapshot the IDs we need to compare (ends the tray borrow).
+        let ids = match &self.tray {
+            Some(ts) => (
+                ts.quit_id.clone(),
+                ts.sounds_id.clone(),
+                ts.overlay_id.clone(),
+                ts.login_id.clone(),
+                ts.open_config_id.clone(),
+            ),
+            None => return,
+        };
+
+        if id == ids.0 {
+            event_loop.exit();
+        } else if id == ids.1 {
+            let new = !self.settings.feedback_sounds;
+            self.settings.feedback_sounds = new;
+            if let Some(ref ts) = self.tray { ts.sounds_item.set_checked(new); }
+            let _ = self.settings.save();
+        } else if id == ids.2 {
+            let new = !self.settings.show_overlay;
+            self.settings.show_overlay = new;
+            if let Some(ref ts) = self.tray { ts.overlay_item.set_checked(new); }
+            let _ = self.settings.save();
+        } else if id == ids.3 {
+            let new = !self.settings.launch_at_login;
+            if launcher::set_launch_at_login(new, &self.binary_path).is_ok() {
+                self.settings.launch_at_login = new;
+                if let Some(ref ts) = self.tray { ts.login_item.set_checked(new); }
+                let _ = self.settings.save();
+            }
+        } else if id == ids.4 {
+            open_config_file();
+        }
+    }
+}
+
+// ─── ApplicationHandler ─────────────────────────────────────────────────────
 
 impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        // Create overlay window once.
+        // ── Overlay window ──
         if self.overlay.is_none() {
             let attrs = Window::default_attributes()
                 .with_inner_size(LogicalSize::new(OVERLAY_W, OVERLAY_H))
@@ -107,7 +187,6 @@ impl ApplicationHandler<AppEvent> for App {
                     return;
                 }
             };
-
             let _ = window.set_cursor_hittest(false);
 
             if let Some(monitor) = window.current_monitor() {
@@ -127,22 +206,81 @@ impl ApplicationHandler<AppEvent> for App {
             }
         }
 
-        // Create tray icon once (must be on main thread).
+        // ── Tray icon + menu (must be on main thread) ──
         if self.tray.is_none() {
             if let Some(icon) = make_tray_icon() {
                 let menu = Menu::new();
+
+                // Header (non-interactive)
+                let _ = menu.append(&MenuItem::new("Bol", false, None));
+                let _ = menu.append(&MenuItem::new(
+                    format!("Hold {} to dictate", self.settings.hotkey),
+                    false, None,
+                ));
+                let _ = menu.append(&MenuItem::new("─────────────────────", false, None));
+
+                // Recent transcriptions (3 fixed slots, updated dynamically)
+                let _ = menu.append(&MenuItem::new("Recent:", false, None));
+                let hist: [MenuItem; HISTORY_SLOTS] = [
+                    MenuItem::new("  —", false, None),
+                    MenuItem::new("  —", false, None),
+                    MenuItem::new("  —", false, None),
+                ];
+                let hist_handles = [hist[0].clone(), hist[1].clone(), hist[2].clone()];
+                for item in &hist { let _ = menu.append(item); }
+                let _ = menu.append(&MenuItem::new("─────────────────────", false, None));
+
+                // Toggle settings
+                let sounds_item = CheckMenuItem::new(
+                    "Sound Feedback", true, self.settings.feedback_sounds, None,
+                );
+                let sounds_id = sounds_item.id().clone();
+                let overlay_item = CheckMenuItem::new(
+                    "Show Overlay", true, self.settings.show_overlay, None,
+                );
+                let overlay_id = overlay_item.id().clone();
+                let login_item = CheckMenuItem::new(
+                    "Launch at Login", true, self.settings.launch_at_login, None,
+                );
+                let login_id = login_item.id().clone();
+                let _ = menu.append(&sounds_item);
+                let _ = menu.append(&overlay_item);
+                let _ = menu.append(&login_item);
+                let _ = menu.append(&MenuItem::new("─────────────────────", false, None));
+
+                // Utilities
+                let open_config = MenuItem::new("Open Config File", true, None);
+                let open_config_id = open_config.id().clone();
+                let _ = menu.append(&open_config);
+                let _ = menu.append(&MenuItem::new("─────────────────────", false, None));
+
+                // Footer
+                let _ = menu.append(&MenuItem::new(
+                    format!("Bol v{}", APP_VERSION), false, None,
+                ));
                 let quit_item = MenuItem::new("Quit Bol", true, None);
                 let quit_id = quit_item.id().clone();
                 let _ = menu.append(&quit_item);
+
                 match TrayIconBuilder::new()
                     .with_icon(icon)
-                    .with_tooltip("Bol — Hold Ctrl+Shift+Space to dictate")
+                    .with_tooltip(format!("Bol — {} to dictate", self.settings.hotkey))
                     .with_menu(Box::new(menu))
                     .build()
                 {
                     Ok(tray) => {
-                        self.tray = Some(tray);
-                        self.quit_id = Some(quit_id);
+                        self.tray = Some(TrayState {
+                            _tray: tray,
+                            quit_id,
+                            sounds_item,
+                            sounds_id,
+                            overlay_item,
+                            overlay_id,
+                            login_item,
+                            login_id,
+                            open_config_id,
+                            hist: hist_handles,
+                        });
                     }
                     Err(e) => eprintln!("Tray icon unavailable: {}", e),
                 }
@@ -151,11 +289,9 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Poll the tray menu channel — fires when user clicks "Quit Bol".
-        if let Ok(event) = MenuEvent::receiver().try_recv() {
-            if self.quit_id.as_ref() == Some(&event.id) {
-                event_loop.exit();
-            }
+        while let Ok(ev) = MenuEvent::receiver().try_recv() {
+            let id = ev.id;
+            self.handle_menu_event(id, event_loop);
         }
     }
 
@@ -177,32 +313,35 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::StartRecording => {
-                feedback::play_start();
+                if self.settings.feedback_sounds { feedback::play_start(); }
+
                 {
                     let mut rec = self.recorder.lock().unwrap();
                     if let Err(e) = rec.start() {
                         eprintln!("Recording failed: {}", e);
-                        feedback::play_error();
+                        if self.settings.feedback_sounds { feedback::play_error(); }
                         return;
                     }
                 }
-                if let Some(ref mut o) = self.overlay {
-                    o.set_recording(true);
-                    o.window.set_visible(true);
+
+                if self.settings.show_overlay {
+                    if let Some(ref mut o) = self.overlay {
+                        o.set_recording(true);
+                        o.window.set_visible(true);
+                    }
                 }
 
                 let stop = Arc::new(AtomicBool::new(false));
                 self.level_stop = Some(stop.clone());
                 let audio_buf = self.recorder.lock().unwrap().buffer_arc();
                 let proxy = self.proxy.clone();
-                let max_secs = self.max_recording_secs as u64;
+                let max_secs = self.settings.max_recording_secs as u64;
                 let start_time = std::time::Instant::now();
 
                 std::thread::spawn(move || {
                     while !stop.load(Ordering::Relaxed) {
                         let level = peak_from_buf(&audio_buf);
                         let _ = proxy.send_event(AppEvent::AudioLevel(level));
-                        // Auto-stop if the user holds the hotkey too long.
                         if start_time.elapsed().as_secs() >= max_secs {
                             eprintln!("Max recording time ({max_secs}s) reached, stopping.");
                             let _ = proxy.send_event(AppEvent::StopRecording);
@@ -214,12 +353,8 @@ impl ApplicationHandler<AppEvent> for App {
             }
 
             AppEvent::CancelRecording => {
-                if let Some(s) = self.level_stop.take() {
-                    s.store(true, Ordering::Relaxed);
-                }
-                if let Some(s) = self.tick_stop.take() {
-                    s.store(true, Ordering::Relaxed);
-                }
+                if let Some(s) = self.level_stop.take() { s.store(true, Ordering::Relaxed); }
+                if let Some(s) = self.tick_stop.take() { s.store(true, Ordering::Relaxed); }
                 let _ = self.recorder.lock().unwrap().stop();
                 if let Some(ref mut o) = self.overlay {
                     o.set_recording(false);
@@ -230,10 +365,8 @@ impl ApplicationHandler<AppEvent> for App {
             }
 
             AppEvent::StopRecording => {
-                if let Some(s) = self.level_stop.take() {
-                    s.store(true, Ordering::Relaxed);
-                }
-                feedback::play_stop();
+                if let Some(s) = self.level_stop.take() { s.store(true, Ordering::Relaxed); }
+                if self.settings.feedback_sounds { feedback::play_stop(); }
                 let audio = self.recorder.lock().unwrap().stop();
 
                 let duration = audio.len() as f32 / 16_000.0;
@@ -246,14 +379,14 @@ impl ApplicationHandler<AppEvent> for App {
                     return;
                 }
 
-                // Switch overlay to "thinking" mode — stays visible with animated dots.
+                // Switch overlay to thinking-dots mode.
                 if let Some(ref mut o) = self.overlay {
                     o.set_recording(false);
                     o.set_transcribing(true);
                     o.window.request_redraw();
                 }
 
-                // Tick thread keeps the thinking-dots animation moving.
+                // Tick thread drives the thinking-dots animation.
                 let tick_stop = Arc::new(AtomicBool::new(false));
                 self.tick_stop = Some(tick_stop.clone());
                 let tick_proxy = self.proxy.clone();
@@ -264,25 +397,29 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                 });
 
-                eprintln!("Transcribing {:.1}s...", duration);
+                eprintln!("Transcribing {:.1}s of audio...", duration);
                 let t = self.transcriber.clone();
                 let proxy = self.proxy.clone();
                 std::thread::spawn(move || {
-                    match t.transcribe(&audio) {
-                        Ok(text) => {
-                            let text = text.trim().to_string();
+                    let text = match t.transcribe(&audio) {
+                        Ok(raw) => {
+                            let text = raw.trim().to_string();
                             if text.is_empty() {
                                 eprintln!("Nothing detected.");
                             } else {
-                                eprintln!("Typing: \"{}\"", text);
+                                eprintln!("Typing: {:?}", text);
                                 if let Err(e) = typer::type_text(&text) {
                                     eprintln!("Typing error: {}", e);
                                 }
                             }
+                            text
                         }
-                        Err(e) => eprintln!("Transcription error: {}", e),
-                    }
-                    let _ = proxy.send_event(AppEvent::TranscriptionDone);
+                        Err(e) => {
+                            eprintln!("Transcription error: {}", e);
+                            String::new()
+                        }
+                    };
+                    let _ = proxy.send_event(AppEvent::TranscriptionDone(text));
                 });
             }
 
@@ -300,30 +437,90 @@ impl ApplicationHandler<AppEvent> for App {
                 }
             }
 
-            AppEvent::TranscriptionDone => {
-                if let Some(s) = self.tick_stop.take() {
-                    s.store(true, Ordering::Relaxed);
-                }
+            AppEvent::TranscriptionDone(text) => {
+                if let Some(s) = self.tick_stop.take() { s.store(true, Ordering::Relaxed); }
                 if let Some(ref mut o) = self.overlay {
                     o.set_transcribing(false);
                     o.window.set_visible(false);
+                }
+                // Update in-memory history and tray menu slots.
+                if !text.is_empty() {
+                    self.history.push_front(text.clone());
+                    if self.history.len() > HISTORY_SLOTS {
+                        self.history.pop_back();
+                    }
+                    self.refresh_history_menu();
+                    append_history_file(&text);
                 }
             }
         }
     }
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+fn truncate_menu(s: &str) -> String {
+    const MAX: usize = 45;
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= MAX {
+        s.to_string()
+    } else {
+        format!("{}…", chars[..MAX - 1].iter().collect::<String>())
+    }
+}
+
+fn open_config_file() {
+    let path = match dirs::home_dir() {
+        Some(h) => h.join(".bol").join("config.toml"),
+        None => return,
+    };
+    // Ensure file exists before opening.
+    if !path.exists() {
+        let _ = settings::Settings::default().save();
+    }
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(&path).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("notepad").arg(&path).spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+}
+
+fn append_history_file(text: &str) {
+    let path = match dirs::home_dir() {
+        Some(h) => h.join(".bol").join("history.txt"),
+        None => return,
+    };
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let entry = format!("[{}] {}\n", secs, text.trim());
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map(|mut f| { use std::io::Write; f.write_all(entry.as_bytes()) });
+}
+
+// ─── main ────────────────────────────────────────────────────────────────────
+
 fn main() -> Result<()> {
-    let cfg = settings::Settings::load();
+    let mut cfg = settings::Settings::load();
 
-    eprintln!("Bol — System-wide Whisper Dictation");
-    eprintln!("Hold Ctrl+Shift+Space anywhere to dictate.");
+    eprintln!("Bol v{} — System-wide Whisper Dictation", APP_VERSION);
+    eprintln!("Hold {} anywhere to dictate.", cfg.hotkey);
     eprintln!(
-        "Settings: language={}, max_recording={}s  (edit ~/.bol/config.toml to change)\n",
-        cfg.language, cfg.max_recording_secs
+        "Settings: language={}, max={}s, sounds={}, overlay={}, hotkey={}",
+        cfg.language, cfg.max_recording_secs, cfg.feedback_sounds,
+        cfg.show_overlay, cfg.hotkey
     );
+    eprintln!("Edit ~/.bol/config.toml to change settings.\n");
 
-    // Select model based on compile-time feature flag.
+    // Check Accessibility permission (needed for typing text into other apps).
+    permissions::check_and_warn_accessibility();
+
+    // Select model: small.en by default, medium.en with --features medium.
     #[cfg(feature = "medium")]
     let model_name = "medium.en";
     #[cfg(not(feature = "medium"))]
@@ -332,24 +529,29 @@ fn main() -> Result<()> {
     let model_path = model::ensure_model(model_name)?;
     let transcriber = Arc::new(transcriber::Transcriber::new(&model_path, &cfg.language)?);
     let recorder = Arc::new(Mutex::new(audio::Recorder::new()?));
+    let binary_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("bol"));
+    let hotkey_def = hotkey::parse_hotkey(&cfg.hotkey);
+    // Sync launch_at_login with actual OS state in case plist was manually added/removed.
+    cfg.launch_at_login = launcher::is_launch_at_login();
 
-    eprintln!("Ready. Hold Ctrl+Shift+Space to start recording.\n");
+    eprintln!("Ready. Hold {} to start recording.\n", cfg.hotkey);
 
+    // Platform startup notification
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("osascript")
         .args([
             "-e",
-            r#"display notification "Hold Ctrl+Shift+Space anywhere to dictate" with title "Bol is ready""#,
+            &format!(
+                r#"display notification "Hold {} anywhere to dictate" with title "Bol is ready""#,
+                cfg.hotkey
+            ),
         ])
         .spawn();
 
     #[cfg(target_os = "windows")]
     let _ = std::process::Command::new("powershell")
         .args([
-            "-NoProfile",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
+            "-NoProfile", "-WindowStyle", "Hidden", "-Command",
             concat!(
                 "Add-Type -AssemblyName System.Windows.Forms; ",
                 "$n = New-Object System.Windows.Forms.NotifyIcon; ",
@@ -361,6 +563,7 @@ fn main() -> Result<()> {
         ])
         .spawn();
 
+    // Build event loop (background-only on macOS — no Dock icon).
     #[cfg(target_os = "macos")]
     let event_loop = {
         use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
@@ -373,21 +576,21 @@ fn main() -> Result<()> {
 
     let proxy = event_loop.create_proxy();
 
-    // Hotkey polling thread — CGEventSourceKeyState on macOS, GetAsyncKeyState on Windows.
+    // Hotkey polling thread — uses platform HID state, no permissions needed.
     {
         let proxy = proxy.clone();
+        let hotkey_def = hotkey_def.clone();
         std::thread::spawn(move || {
             let mut recording = false;
             let mut prev_esc = false;
             loop {
-                let hotkey_active =
-                    hotkey::ctrl_held() && hotkey::shift_held() && hotkey::space_held();
+                let active = hotkey::hotkey_active(&hotkey_def);
                 let esc = hotkey::esc_held();
 
-                if hotkey_active && !recording {
+                if active && !recording {
                     recording = true;
                     let _ = proxy.send_event(AppEvent::StartRecording);
-                } else if !hotkey_active && recording {
+                } else if !active && recording {
                     recording = false;
                     let _ = proxy.send_event(AppEvent::StopRecording);
                 }
@@ -406,13 +609,14 @@ fn main() -> Result<()> {
     let mut app = App {
         overlay: None,
         tray: None,
-        quit_id: None,
         recorder,
         transcriber,
         proxy,
         level_stop: None,
         tick_stop: None,
-        max_recording_secs: cfg.max_recording_secs,
+        settings: cfg,
+        history: VecDeque::new(),
+        binary_path,
     };
 
     event_loop.run_app(&mut app)?;

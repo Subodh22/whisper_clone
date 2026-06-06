@@ -93,6 +93,7 @@ fn download_model(model_name: &str, dest: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 /// Lists available model names and their approximate sizes.
 pub fn available_models() -> Vec<(&'static str, &'static str)> {
     vec![

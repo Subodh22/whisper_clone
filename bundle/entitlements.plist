@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Microphone access for recording -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Outbound network for the one-time Whisper model download -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Read/write access to ~/. for model cache and config -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- Hardened runtime — required for notarization -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!--
+        Accessibility for typing into other apps (com.apple.security.temporary-exception)
+        is NOT available in the Mac App Store sandbox. For direct distribution / notarized
+        builds outside the App Store, request Accessibility in System Settings at runtime
+        via AXIsProcessTrusted() — see src/permissions.rs.
+    -->
+</dict>
+</plist>

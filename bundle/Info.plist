@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Identity -->
+    <key>CFBundleName</key>
+    <string>Bol</string>
+    <key>CFBundleDisplayName</key>
+    <string>Bol</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.bol.dictation</string>
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleExecutable</key>
+    <string>bol</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+
+    <!-- Icon -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+
+    <!-- Background app — no Dock icon, lives in menu bar only -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- macOS minimum version -->
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+
+    <!-- Privacy usage strings (required for App Store and notarization) -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Bol records your voice to transcribe speech to text using Whisper AI — entirely on-device. No audio is ever sent to a server.</string>
+
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Bol types the transcribed text into whichever app you are using. This requires Accessibility permission.</string>
+
+    <!-- Allows the app to find and load the Whisper model from ~/. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+        <!-- Model download from Hugging Face CDN -->
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>huggingface.co</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <false/>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+            </dict>
+        </dict>
+    </dict>
+
+    <!-- Required for notarization -->
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+</dict>
+</plist>

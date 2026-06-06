@@ -3,22 +3,49 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+fn default_language() -> String { "en".to_string() }
+fn default_max_recording_secs() -> u32 { 60 }
+fn default_true() -> bool { true }
+fn default_hotkey() -> String { "ctrl+shift+space".to_string() }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
-    /// Whisper language code: "en", "es", "fr", "de", "zh", etc.
-    /// Use "auto" to let Whisper detect the language automatically (slower).
+    /// Whisper language: "en", "es", "fr", etc. Use "auto" for detection.
+    #[serde(default = "default_language")]
     pub language: String,
 
-    /// Recording auto-stops after this many seconds. Prevents accidentally
-    /// holding the hotkey and generating a huge audio file.
+    /// Auto-stop recording after this many seconds.
+    #[serde(default = "default_max_recording_secs")]
     pub max_recording_secs: u32,
+
+    /// Play audio cues on start/stop.
+    #[serde(default = "default_true")]
+    pub feedback_sounds: bool,
+
+    /// Show the recording overlay window while dictating.
+    #[serde(default = "default_true")]
+    pub show_overlay: bool,
+
+    /// Hotkey combination. Modifiers: ctrl, shift, alt, cmd.
+    /// Keys: space, a-z, 0-9, enter, tab.
+    /// Examples: "ctrl+shift+space", "cmd+shift+d", "ctrl+alt+r"
+    #[serde(default = "default_hotkey")]
+    pub hotkey: String,
+
+    /// Launch Bol automatically at login.
+    #[serde(default)]
+    pub launch_at_login: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            language: "en".to_string(),
-            max_recording_secs: 60,
+            language: default_language(),
+            max_recording_secs: default_max_recording_secs(),
+            feedback_sounds: true,
+            show_overlay: true,
+            hotkey: default_hotkey(),
+            launch_at_login: false,
         }
     }
 }
@@ -28,8 +55,7 @@ fn config_path() -> Option<PathBuf> {
 }
 
 impl Settings {
-    /// Load settings from ~/.bol/config.toml. Returns defaults if the file
-    /// doesn't exist or can't be parsed.
+    /// Load settings from ~/.bol/config.toml. Returns defaults if missing or unparseable.
     pub fn load() -> Self {
         let path = match config_path() {
             Some(p) => p,
@@ -41,7 +67,7 @@ impl Settings {
                 Self::default()
             }),
             Err(_) => {
-                // First run — write a default config so the user can find and edit it.
+                // First run — write defaults so the user can discover and edit them.
                 let s = Self::default();
                 let _ = s.save();
                 s
