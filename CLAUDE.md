@@ -4,47 +4,54 @@ System-wide dictation powered by Whisper AI — free, offline, private. Hold
 `Ctrl+Shift+Space` anywhere to record; on release the audio is transcribed
 locally and typed into the focused app.
 
-## Architecture
+## How it works
 
-A single Rust binary built on a `winit` event loop. Modules in `src/`:
+1. **Hold** Ctrl+Shift+Space → overlay appears, mic starts recording
+2. **Release** → overlay switches to "thinking" animation (3 pulsing dots) while Whisper runs
+3. **Done** → overlay hides, transcribed text is typed into the focused window
+4. **Escape** (while recording) → cancel, nothing is typed
 
-- `main.rs` — app entry point, the `winit` event loop, and the `AppEvent`
-  state machine (start / stop / cancel recording, audio-level ticks). Spawns a
-  background hotkey-polling thread and an audio-level thread.
-- `hotkey.rs` — polls hardware key state (Ctrl/Shift/Space/Esc). Uses
-  `CGEventSourceKeyState` on macOS and `windows-sys` on Windows.
-- `audio.rs` — `cpal` microphone capture into a shared 16 kHz buffer.
-- `transcriber.rs` — `whisper-rs` inference (CUDA-enabled).
-- `model.rs` — downloads / locates the Whisper model (`small.en` by default,
-  `medium.en` with `--features medium`).
-- `typer.rs` — types transcribed text into the focused app via `enigo`.
-- `feedback.rs` — start/stop/error audio cues.
-- `overlay.rs` — the always-on-top recording overlay. CPU-rendered with
-  `softbuffer` (raw ARGB pixel buffer); fonts via `fontdue`. This is the file to
-  edit for UI/visual changes.
+## Modules (`src/`)
 
-## UI / overlay
+- `main.rs` — winit event loop, `AppEvent` state machine, tray icon, hotkey polling thread
+- `hotkey.rs` — polls hardware key state every 30ms. `CGEventSourceKeyState` on macOS,
+  `GetAsyncKeyState` on Windows. No Accessibility permission needed for detection.
+- `audio.rs` — cpal microphone capture → 16 kHz mono f32 buffer
+- `transcriber.rs` — whisper-rs inference. State is reused across calls (no re-allocation).
+  GPU disabled (`use_gpu(false)`) — Metal from a background thread crashes on macOS.
+- `model.rs` — downloads/locates the Whisper GGML model from Hugging Face
+- `typer.rs` — enigo types transcribed text into the focused app (needs Accessibility permission)
+- `feedback.rs` — start/stop/error audio cues (afplay on macOS, SystemSounds on Windows)
+- `overlay.rs` — always-on-top recording indicator. Dark pill rendered with softbuffer
+  (raw ARGB pixels). Recording: dotted waveform. Transcribing: cascading thinking dots.
+- `settings.rs` — loads/saves `~/.bol/config.toml`
 
-The overlay is a transparent, click-through, always-on-top window shown only
-while recording. It is drawn as a **dark pill**: a red rounded-square record
-button (triangle logo) on the left and a dotted waveform that reacts to mic
-level on the right. All drawing is manual pixel work in `overlay.rs::draw_frame`
-— there is no GPU/HTML layer. Window size and on-screen position are set in
-`main.rs::resumed` (`OVERLAY_W` / `OVERLAY_H`).
+## Settings (`~/.bol/config.toml`)
+
+Created automatically on first run with defaults:
+
+```toml
+language = "en"        # Whisper language code: "en", "es", "fr", "de", "zh", ...
+                       # Use "auto" for automatic detection (slower)
+max_recording_secs = 60  # Auto-stop recording after this many seconds
+```
 
 ## Build & run
 
 ```sh
-cargo build --release            # small.en model
-cargo build --release --features medium
+cargo build --release                    # small.en model (~466 MB)
+cargo build --release --features medium  # medium.en model (~1.5 GB, more accurate)
 cargo run --release
-cargo check                      # fast type-check
+cargo check                              # fast type-check, no binary
 ```
 
-`whisper-rs` is built with the `cuda` feature, so a CUDA toolkit is required to
-compile/link on this machine.
+## Permissions (macOS)
+
+- **Microphone** — granted via system prompt on first recording attempt
+- **Accessibility** — required for enigo to type text into other apps.
+  Grant in System Settings → Privacy & Security → Accessibility
 
 ## Conventions
 
-- Conventional commits.
-- Always run tests before pushing.
+- Conventional commits
+- No GPU usage from background threads (use_gpu = false)

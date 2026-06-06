@@ -5,8 +5,8 @@ edition = "2021"
 description = "System-wide dictation powered by Whisper AI — free, offline, private"
 
 [features]
-# cargo build --release            → uses small.en
-# cargo build --release --features medium → uses medium.en
+# cargo build --release                    → small.en  (466 MB)
+# cargo build --release --features medium  → medium.en (1.5 GB)
 medium = []
 
 [dependencies]
@@ -19,9 +19,10 @@ reqwest = { version = "0.12", features = ["blocking"] }
 indicatif = "0.17"
 winit = "0.30"
 softbuffer = "0.4"
-fontdue = "0.9"
 raw-window-handle = "0.6"
 tray-icon = "0.20"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_UI_Input_KeyboardAndMouse"] }
